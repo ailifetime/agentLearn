@@ -5,3 +5,4 @@ This repository stores code examples for the "15 minutes a day for 15 days to le
 ## Course Code
 
 - `lessons/lesson-01-langchain-intro`: runnable examples for lesson 1, covering direct invocation, prompt templates, and a simple translation assistant
+- `lessons/lesson-02-memory`: runnable examples for lesson 2, covering stateless calls, manual history, memory-enabled chains, and multi-user session isolation
