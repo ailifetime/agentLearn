@@ -48,16 +48,16 @@ def print_section(title: str, content: str) -> None:
 
 
 def run_stateless_demo(llm: ChatOpenAI) -> str:
-    first = llm.invoke("My name is Jack. Reply in Chinese.")
-    second = llm.invoke("What is my name? Reply in Chinese.")
+    first = llm.invoke("My name is Jack. Reply in English.")
+    second = llm.invoke("What is my name? Reply in English.")
     return f"Turn 1: {first.content}\nTurn 2: {second.content}"
 
 
 def run_manual_history_demo(llm: ChatOpenAI) -> str:
     messages = [
-        HumanMessage(content="My name is Jack. Reply in Chinese."),
-        AIMessage(content="好的，我记住了。"),
-        HumanMessage(content="What is my name? Reply in Chinese."),
+        HumanMessage(content="My name is Jack. Reply in English."),
+        AIMessage(content="Got it. I will remember that."),
+        HumanMessage(content="What is my name? Reply in English."),
     ]
     response = llm.invoke(messages)
     return response.content
@@ -79,8 +79,8 @@ def run_memory_demo(llm: ChatOpenAI) -> str:
     chain, _ = build_memory_chain(llm)
     config = {"configurable": {"session_id": "user_1"}}
 
-    first = chain.invoke("My name is Jack. Reply in Chinese.", config=config)
-    second = chain.invoke("What is my name? Reply in Chinese.", config=config)
+    first = chain.invoke("My name is Jack. Reply in English.", config=config)
+    second = chain.invoke("What is my name? Reply in English.", config=config)
     return f"Turn 1: {first.content}\nTurn 2: {second.content}"
 
 
@@ -96,7 +96,7 @@ def build_prompt_memory_chain(
 
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "You are a friendly assistant. Keep replies concise and reply in Chinese."),
+            ("system", "You are a friendly assistant. Keep replies concise and reply in English."),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{input}"),
         ]
