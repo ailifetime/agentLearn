@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import math
 import os
+import re
+import sys
 from pathlib import Path
 from typing import Iterable
 
 from dotenv import load_dotenv
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
+try:
+    from langchain_community.vectorstores import FAISS
+except Exception:
+    FAISS = None
 
 
 CONFIG_PATH = Path.home() / ".config" / "codex" / "openai-gateway.env"
@@ -29,6 +38,102 @@ Company Q3 OKRs:
 2. Launch a new AI agent product.
 3. Complete the data platform migration.
 """.strip()
+
+
+class LocalHashEmbeddings(Embeddings):
+    """Small deterministic fallback embeddings for OpenAI-incompatible gateways."""
+
+    def __init__(self, dimensions: int = 256) -> None:
+        self.dimensions = dimensions
+
+    def _tokenize(self, text: str) -> list[str]:
+        return re.findall(r"[a-z0-9]+", text.lower())
+
+    def _embed(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimensions
+        tokens = self._tokenize(text)
+
+        if not tokens:
+            return vector
+
+        for token in tokens:
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[index] += sign
+
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm == 0:
+            return vector
+
+        return [value / norm for value in vector]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+
+class InMemoryRetriever:
+    """Simple retriever used when FAISS is unavailable in the local environment."""
+
+    def __init__(
+        self,
+        texts: list[str],
+        embeddings: Embeddings,
+        *,
+        k: int = 4,
+        search_type: str = "similarity",
+    ) -> None:
+        self.documents = [Document(page_content=text) for text in texts]
+        self.embeddings = embeddings
+        self.k = k
+        self.search_type = search_type
+        self.document_vectors = embeddings.embed_documents(texts)
+
+    def _cosine_similarity(self, left: list[float], right: list[float]) -> float:
+        return sum(left_value * right_value for left_value, right_value in zip(left, right))
+
+    def invoke(self, query: str) -> list[Document]:
+        query_vector = self.embeddings.embed_query(query)
+        scored_documents = sorted(
+            (
+                (self._cosine_similarity(query_vector, doc_vector), document)
+                for document, doc_vector in zip(self.documents, self.document_vectors)
+            ),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        if self.search_type == "mmr":
+            return [document for _, document in scored_documents[: self.k]]
+
+        return [document for _, document in scored_documents[: self.k]]
+
+
+def build_retriever(
+    texts: list[str],
+    embeddings: Embeddings,
+    *,
+    k: int = 4,
+    search_type: str = "similarity",
+):
+    if FAISS is not None:
+        try:
+            vectorstore = FAISS.from_texts(texts, embedding=embeddings)
+            return vectorstore.as_retriever(
+                search_type=search_type,
+                search_kwargs={"k": k},
+            )
+        except Exception:
+            pass
+
+    print(
+        "Warning: FAISS is unavailable; using the built-in in-memory retriever instead.",
+        file=sys.stderr,
+    )
+    return InMemoryRetriever(texts, embeddings, k=k, search_type=search_type)
 
 
 def load_runtime_env() -> None:
@@ -57,15 +162,34 @@ def create_llm() -> ChatOpenAI:
     return ChatOpenAI(**kwargs)
 
 
-def create_embeddings() -> OpenAIEmbeddings:
+def create_embeddings() -> Embeddings:
     model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-    kwargs = {"model": model}
+    kwargs = {
+        "model": model,
+        "timeout": 30,
+        "max_retries": 1,
+    }
 
-    base_url = os.getenv("OPENAI_BASE_URL")
+    base_url = os.getenv("OPENAI_EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
     if base_url:
         kwargs["base_url"] = base_url
 
-    return OpenAIEmbeddings(**kwargs)
+    api_key = os.getenv("OPENAI_EMBEDDING_API_KEY")
+    if api_key:
+        kwargs["api_key"] = api_key
+
+    remote_embeddings = OpenAIEmbeddings(**kwargs)
+
+    try:
+        remote_embeddings.embed_query("health check")
+        return remote_embeddings
+    except Exception as exc:
+        print(
+            "Warning: remote embeddings are unavailable; using local hash embeddings "
+            f"instead. Reason: {exc}",
+            file=sys.stderr,
+        )
+        return LocalHashEmbeddings()
 
 
 def print_section(title: str, content: str) -> None:
@@ -78,13 +202,8 @@ def format_documents(docs: Iterable[Document]) -> str:
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def build_vectorstore(embeddings: OpenAIEmbeddings) -> FAISS:
-    return FAISS.from_texts(KNOWLEDGE_BASE_TEXTS, embedding=embeddings)
-
-
-def build_company_retriever(embeddings: OpenAIEmbeddings):
-    vectorstore = FAISS.from_texts([COMPANY_OKR_TEXT], embedding=embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 1})
+def build_company_retriever(embeddings: Embeddings):
+    return build_retriever([COMPANY_OKR_TEXT], embeddings, k=1)
 
 
 def run_manual_context_demo(llm: ChatOpenAI) -> str:
@@ -101,14 +220,19 @@ Question: {question}
     return response.content
 
 
-def run_embedding_demo(embeddings: OpenAIEmbeddings) -> str:
+def run_embedding_demo(embeddings: Embeddings) -> str:
     vector = embeddings.embed_query("What is an AI agent?")
     preview = ", ".join(f"{value:.4f}" for value in vector[:5])
-    return f"Vector length: {len(vector)}\nFirst 5 values: [{preview}]"
+    backend = type(embeddings).__name__
+    return (
+        f"Embedding backend: {backend}\n"
+        f"Vector length: {len(vector)}\n"
+        f"First 5 values: [{preview}]"
+    )
 
 
-def run_retrieval_demo(embeddings: OpenAIEmbeddings) -> str:
-    retriever = build_vectorstore(embeddings).as_retriever()
+def run_retrieval_demo(embeddings: Embeddings) -> str:
+    retriever = build_retriever(KNOWLEDGE_BASE_TEXTS, embeddings)
     results = retriever.invoke("What is RAG?")
     return "\n".join(f"- {doc.page_content}" for doc in results)
 
@@ -128,7 +252,7 @@ Question: {question}
 
     return (
         {
-            "context": retriever | RunnableLambda(format_documents),
+            "context": RunnableLambda(retriever.invoke) | RunnableLambda(format_documents),
             "question": RunnablePassthrough(),
         }
         | prompt
@@ -136,19 +260,20 @@ Question: {question}
     )
 
 
-def run_rag_demo(llm: ChatOpenAI, embeddings: OpenAIEmbeddings) -> str:
-    retriever = build_vectorstore(embeddings).as_retriever()
+def run_rag_demo(llm: ChatOpenAI, embeddings: Embeddings) -> str:
+    retriever = build_retriever(KNOWLEDGE_BASE_TEXTS, embeddings)
     rag_chain = build_rag_chain(llm, retriever)
     response = rag_chain.invoke("What is RAG?")
     return response.content
 
 
-def run_tuned_retrieval_demo(embeddings: OpenAIEmbeddings) -> str:
-    vectorstore = build_vectorstore(embeddings)
-    similarity_docs = vectorstore.as_retriever(search_kwargs={"k": 2}).invoke("What is RAG?")
-    mmr_docs = vectorstore.as_retriever(
+def run_tuned_retrieval_demo(embeddings: Embeddings) -> str:
+    similarity_docs = build_retriever(KNOWLEDGE_BASE_TEXTS, embeddings, k=2).invoke("What is RAG?")
+    mmr_docs = build_retriever(
+        KNOWLEDGE_BASE_TEXTS,
+        embeddings,
+        k=3,
         search_type="mmr",
-        search_kwargs={"k": 3},
     ).invoke("What is RAG?")
 
     similarity_text = "\n".join(f"- {doc.page_content}" for doc in similarity_docs)
@@ -181,7 +306,7 @@ def build_rag_chain_with_memory(llm: ChatOpenAI, retriever):
     chain = (
         {
             "context": RunnableLambda(lambda data: data["question"])
-            | retriever
+            | RunnableLambda(retriever.invoke)
             | RunnableLambda(format_documents),
             "question": RunnableLambda(lambda data: data["question"]),
             "history": RunnableLambda(lambda data: data["history"]),
@@ -199,7 +324,7 @@ def build_rag_chain_with_memory(llm: ChatOpenAI, retriever):
     return chain_with_memory
 
 
-def run_rag_memory_demo(llm: ChatOpenAI, embeddings: OpenAIEmbeddings) -> str:
+def run_rag_memory_demo(llm: ChatOpenAI, embeddings: Embeddings) -> str:
     retriever = build_company_retriever(embeddings)
     chain_with_memory = build_rag_chain_with_memory(llm, retriever)
     config = {"configurable": {"session_id": "user_1"}}

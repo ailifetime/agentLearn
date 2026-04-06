@@ -22,6 +22,8 @@ Expected variables:
 - `OPENAI_BASE_URL` (optional)
 - `OPENAI_MODEL` (optional)
 - `OPENAI_EMBEDDING_MODEL` (optional)
+- `OPENAI_EMBEDDING_BASE_URL` (optional, overrides `OPENAI_BASE_URL` for embeddings)
+- `OPENAI_EMBEDDING_API_KEY` (optional, overrides `OPENAI_API_KEY` for embeddings)
 
 ## Install
 
@@ -53,5 +55,7 @@ python lessons/lesson-03-rag/main.py --demo rag-memory
 ## Notes
 
 - The example stores vectors in memory with FAISS, so nothing is persisted after the script exits.
+- If FAISS is not available in your local Python environment, the script will automatically fall back to a built-in in-memory retriever.
 - The `rag-memory` demo uses a tiny in-memory knowledge base and in-memory chat history to mirror the article flow.
 - The retrieval examples intentionally use small sample texts so the end-to-end pipeline is easy to inspect.
+- If your OpenAI-compatible gateway does not implement the `/embeddings` endpoint, the script will automatically fall back to a local deterministic hash embedding so the lesson can still run end to end.
