@@ -9,7 +9,7 @@ from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 
 
-CONFIG_PATH = Path.home() / ".config" / "codex" / "openai-gateway.env"
+CONFIG_PATH = Path.home() / ".config" / "code" / "openai-gateway.env"
 
 
 def load_runtime_env() -> None:
@@ -19,7 +19,7 @@ def load_runtime_env() -> None:
 
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to ~/.config/codex/openai-gateway.env."
+            "OPENAI_API_KEY is not set. Add it to ~/.config/code/openai-gateway.env."
         )
 
 

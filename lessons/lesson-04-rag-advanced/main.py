@@ -25,7 +25,7 @@ except Exception:
     Chroma = None
 
 
-CONFIG_PATH = Path.home() / ".config" / "codex" / "openai-gateway.env"
+CONFIG_PATH = Path.home() / ".config" / "code" / "openai-gateway.env"
 LESSON_DIR = Path(__file__).resolve().parent
 DATA_PATH = LESSON_DIR / "data" / "company_handbook.md"
 RUNTIME_DIR = LESSON_DIR / "runtime"
@@ -117,7 +117,7 @@ def load_runtime_env() -> None:
 
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to ~/.config/codex/openai-gateway.env."
+            "OPENAI_API_KEY is not set. Add it to ~/.config/code/openai-gateway.env."
         )
 
 

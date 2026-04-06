@@ -24,7 +24,7 @@ except Exception:
     FAISS = None
 
 
-CONFIG_PATH = Path.home() / ".config" / "codex" / "openai-gateway.env"
+CONFIG_PATH = Path.home() / ".config" / "code" / "openai-gateway.env"
 KNOWLEDGE_BASE_TEXTS = [
     "LangChain is a framework for building LLM-powered applications.",
     "RAG helps models answer questions with external knowledge.",
@@ -143,7 +143,7 @@ def load_runtime_env() -> None:
 
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(
-            "OPENAI_API_KEY is not set. Add it to ~/.config/codex/openai-gateway.env."
+            "OPENAI_API_KEY is not set. Add it to ~/.config/code/openai-gateway.env."
         )
 
 

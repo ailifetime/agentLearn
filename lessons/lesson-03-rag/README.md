@@ -14,7 +14,7 @@ This folder contains the runnable code for the third article:
 This project follows the workspace rule that secrets stay outside the repository.
 Store your OpenAI-compatible configuration in:
 
-- `~/.config/codex/openai-gateway.env`
+- `~/.config/code/openai-gateway.env`
 
 Expected variables:
 
